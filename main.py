@@ -5,6 +5,15 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
+
+# Add this
+templates = Jinja2Templates(directory="templates")
+
 # Load env vars
 load_dotenv()
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
@@ -138,3 +147,8 @@ def ask(question: str = Query(...)):
     answer = ask_openai(context, question)
 
     return {"answer": answer}
+
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
