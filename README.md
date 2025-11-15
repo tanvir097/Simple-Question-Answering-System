@@ -18,11 +18,11 @@ GET /ask?question=When is Sophia Al-Farsi traveling?
 
 I explored multiple approaches:
 
-Rule-based extraction — simple, fast, deterministic.
+Rule-based extraction - simple, fast, deterministic.
 
-LLM-based reasoning — improved flexibility but limited by quota and deployment constraints.
+LLM-based reasoning - improved flexibility but limited by quota and deployment constraints.
 
-Hybrid extraction — name detection + template-guided inference.
+Hybrid extraction - name detection + template-guided inference.
 
 Final solution uses the most stable and deploy-friendly approach.
 
