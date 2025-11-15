@@ -1,17 +1,27 @@
 from fastapi import FastAPI, Query
 import httpx
-import re
 import unicodedata
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Load env vars
+load_dotenv()
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=OPENAI_KEY)
 
 app = FastAPI()
 
-# ----------------------------
-# Helpers
-# ----------------------------
+# ----------------------------------------
+# Normalize text
+# ----------------------------------------
 def norm(x):
-    return unicodedata.normalize("NFKD", x).strip()
+    return unicodedata.normalize("NFKD", x).replace("–", "-").replace("—", "-").strip()
 
-
+# ----------------------------------------
+# Load messages with API key
+# ----------------------------------------
 MESSAGES_URL = "https://november7-730026606190.europe-west1.run.app/messages"
 
 def load_messages():
@@ -29,117 +39,102 @@ def load_messages():
     print("Loaded", len(msgs), "messages")
     return msgs
 
-
 MESSAGES = load_messages()
 ALL_USERS = list({m["user_name"] for m in MESSAGES})
 
 
-# ----------------------------
-# Extract which member is asked about
-# ----------------------------
-def find_person(question: str):
-    q = question.lower()
+# ----------------------------------------
+# Person extraction
+# ----------------------------------------
+def extract_person(question: str):
+    q = norm(question.lower())
 
-    # full name
-    for u in ALL_USERS:
-        if u.lower() in q:
-            return u
+    # Full name match
+    for user in ALL_USERS:
+        if user.lower() in q:
+            return user
 
-    # first name only
-    for u in ALL_USERS:
-        first = u.split()[0].lower()
+    # First name match
+    for user in ALL_USERS:
+        first = user.split()[0].lower()
         if first in q:
-            return u
+            return user
 
     return None
 
 
-# ----------------------------
-# Message filtering
-# ----------------------------
-def get_user_messages(user):
-    u = user.lower()
-    return [m for m in MESSAGES if m["user_name"].lower() == u]
+# ----------------------------------------
+# Get messages for user
+# ----------------------------------------
+def get_user_messages(person: str):
+    return [
+        m for m in MESSAGES
+        if norm(m["user_name"].lower()) == norm(person.lower())
+    ]
 
 
-# ----------------------------
-# Extract structured info
-# ----------------------------
-DATE_REGEX = r"\b(?:\d{4}-\d{2}-\d{2}|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tonight|tomorrow|this friday|this saturday|next week|next monday|first week of [a-z]+)\b"
-LOCATION_REGEX = r"\b(in|to)\s+([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)*)"
-COUNT_REGEX = r"\b(\d+)\b"
+# ----------------------------------------
+# Ask OpenAI
+# ----------------------------------------
+def ask_openai(context: str, question: str):
 
-def extract_date(text):
-    m = re.search(DATE_REGEX, text, re.IGNORECASE)
-    return m.group(0) if m else None
+    prompt = f"""
+You are an information extraction assistant. Use ONLY the facts provided in MESSAGES. 
+Do NOT guess or infer. If the answer is missing, reply exactly: "No information available."
 
-def extract_location(text):
-    m = re.search(LOCATION_REGEX, text)
-    return m.group(2) if m else None
+MESSAGES:
+{context}
 
-def extract_numbers(text):
-    return re.findall(COUNT_REGEX, text)
+QUESTION:
+{question}
 
+ANSWER:
+"""
 
-# ----------------------------
-# Main QA Logic
-# ----------------------------
-def answer_question(question, msgs):
-    q = question.lower()
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=128,
+    )
 
-    # 1) Travel questions
-    if any(w in q for w in ["travel", "trip", "going to", "visit", "flight", "going"]):
-        for m in msgs:
-            date = extract_date(m["message"])
-            loc = extract_location(m["message"])
-            if date or loc:
-                text_parts = []
-                if loc:
-                    text_parts.append(f"Destination: {loc}")
-                if date:
-                    text_parts.append(f"When: {date}")
-                return ", ".join(text_parts)
-        return "No travel information available."
+    ans = response.choices[0].message.content.strip()
 
-    # 2) Cars / counts
-    if "car" in q or "cars" in q:
-        for m in msgs:
-            nums = extract_numbers(m["message"])
-            if nums:
-                return f"{nums[0]}"
+    # normalize bad LLM behavior
+    if not ans or "no information" in ans.lower():
+        return "No information available."
 
-        return "No information about cars."
-
-    # 3) Favorite restaurants
-    if "restaurant" in q or "favorite" in q:
-        favorites = []
-        for m in msgs:
-            if "restaurant" in m["message"].lower():
-                favorites.append(m["message"])
-        if favorites:
-            return favorites[0]
-        return "No restaurant information available."
-
-    # 4) Generic fallback — return relevant message if any
-    for m in msgs:
-        if any(word in m["message"].lower() for word in ["book", "reserve", "appointment", "tickets", "confirm"]):
-            return m["message"]
-
-    return "No information available."
+    return ans
 
 
-# ----------------------------
-# API Endpoint
-# ----------------------------
+# ----------------------------------------
+# Root endpoint
+# ----------------------------------------
+@app.get("/")
+def home():
+    return {
+        "status": "running",
+        "message": "Use /ask?question=Your question"
+    }
+
+
+# ----------------------------------------
+# Ask endpoint
+# ----------------------------------------
 @app.get("/ask")
 def ask(question: str = Query(...)):
-    person = find_person(question)
+    person = extract_person(question)
+
     if not person:
         return {"answer": "No information available."}
 
     msgs = get_user_messages(person)
+
     if not msgs:
         return {"answer": "No information available."}
 
-    answer = answer_question(question, msgs)
+    context = "\n".join([f"{m['user_name']}: {m['message']}" for m in msgs])
+
+    answer = ask_openai(context, question)
+
     return {"answer": answer}
