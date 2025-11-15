@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Question Answering System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 600px; margin: auto; }
+        input[type=text] {
+            width: 100%; padding: 12px; margin-top: 20px;
+            font-size: 18px; border-radius: 6px; border: 1px solid #ccc;
+        }
+        button {
+            margin-top: 20px; padding: 12px 20px; font-size: 18px;
+            border: none; background-color: #007bff; color: white;
+            border-radius: 6px; cursor: pointer;
+        }
+        button:hover { background-color: #0056b3; }
+        .answer-box {
+            margin-top: 30px; padding: 15px; background: #f0f0f0;
+            border-radius: 6px; font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Ask a Question</h1>
+
+    <input id="questionInput" type="text" placeholder="Type your question here...">
+
+    <button onclick="askQuestion()">Ask</button>
+
+    <div id="answer" class="answer-box" style="display:none;"></div>
+</div>
+
+<script>
+async function askQuestion() {
+    const question = document.getElementById("questionInput").value;
+    if (!question) return;
+
+    const response = await fetch(`/ask?question=` + encodeURIComponent(question));
+    const data = await response.json();
+
+    const box = document.getElementById("answer");
+    box.style.display = "block";
+    box.innerHTML = "<strong>Answer:</strong> " + data.answer;
+}
+</script>
+
+</body>
+</html>
