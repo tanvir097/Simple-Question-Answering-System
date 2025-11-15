@@ -1,7 +1,5 @@
 fastapi
-uvicorn[standard]
+uvicorn
 httpx
-transformers
-torch
-accelerate
-safetensors
+openai
+python-dotenv
