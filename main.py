@@ -1,36 +1,43 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 import httpx
 import unicodedata
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
-# Add this
-templates = Jinja2Templates(directory="templates")
 
-# Load env vars
+# -------------------------
+# Load environment variables
+# -------------------------
 load_dotenv()
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
+if not OPENAI_KEY:
+    raise RuntimeError("OPENAI_API_KEY is missing. Add it in Render Environment Variables.")
+
 client = OpenAI(api_key=OPENAI_KEY)
 
-app = FastAPI()
 
-# ----------------------------------------
-# Normalize text
-# ----------------------------------------
+# -------------------------
+# Initialize FastAPI + Jinja2
+# -------------------------
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+
+# -------------------------
+# Utility: Normalize text
+# -------------------------
 def norm(x):
     return unicodedata.normalize("NFKD", x).replace("–", "-").replace("—", "-").strip()
 
-# ----------------------------------------
-# Load messages with API key
-# ----------------------------------------
+
+# -------------------------
+# Load messages from API
+# -------------------------
 MESSAGES_URL = "https://november7-730026606190.europe-west1.run.app/messages"
 
 def load_messages():
@@ -48,22 +55,23 @@ def load_messages():
     print("Loaded", len(msgs), "messages")
     return msgs
 
+
 MESSAGES = load_messages()
 ALL_USERS = list({m["user_name"] for m in MESSAGES})
 
 
-# ----------------------------------------
-# Person extraction
-# ----------------------------------------
+# -------------------------
+# Extract person name
+# -------------------------
 def extract_person(question: str):
     q = norm(question.lower())
 
-    # Full name match
+    # Match full name
     for user in ALL_USERS:
         if user.lower() in q:
             return user
 
-    # First name match
+    # Match first name
     for user in ALL_USERS:
         first = user.split()[0].lower()
         if first in q:
@@ -72,9 +80,9 @@ def extract_person(question: str):
     return None
 
 
-# ----------------------------------------
-# Get messages for user
-# ----------------------------------------
+# -------------------------
+# Get user messages
+# -------------------------
 def get_user_messages(person: str):
     return [
         m for m in MESSAGES
@@ -82,9 +90,9 @@ def get_user_messages(person: str):
     ]
 
 
-# ----------------------------------------
-# Ask OpenAI
-# ----------------------------------------
+# -------------------------
+# Ask OpenAI model
+# -------------------------
 def ask_openai(context: str, question: str):
 
     prompt = f"""
@@ -109,27 +117,23 @@ ANSWER:
 
     ans = response.choices[0].message.content.strip()
 
-    # normalize bad LLM behavior
     if not ans or "no information" in ans.lower():
         return "No information available."
 
     return ans
 
 
-# ----------------------------------------
-# Root endpoint
-# ----------------------------------------
-@app.get("/")
-def home():
-    return {
-        "status": "running",
-        "message": "Use /ask?question=Your question"
-    }
+# -------------------------
+# Serve HTML UI at root
+# -------------------------
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-# ----------------------------------------
-# Ask endpoint
-# ----------------------------------------
+# -------------------------
+# /ask API endpoint
+# -------------------------
 @app.get("/ask")
 def ask(question: str = Query(...)):
     person = extract_person(question)
@@ -147,8 +151,3 @@ def ask(question: str = Query(...)):
     answer = ask_openai(context, question)
 
     return {"answer": answer}
-
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
